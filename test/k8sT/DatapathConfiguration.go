@@ -482,14 +482,7 @@ var _ = Describe("K8sDatapathConfig", func() {
 	})
 
 	SkipContextIf(helpers.DoesNotRunOnNetNextKernel, "Wireguard encryption", func() {
-		It("Pod2pod is encrypted", func() {
-			deploymentManager.DeployCilium(map[string]string{
-				"tunnel":               "disabled",
-				"autoDirectNodeRoutes": "true",
-				"wireguard.enabled":    "true",
-				"l7Proxy":              "false",
-			}, DeployCiliumOptionsAndDNS)
-
+		testWireguard := func(interNodeDev string) {
 			randomNamespace := deploymentManager.DeployRandomNamespaceShared(DemoDaemonSet)
 			deploymentManager.WaitUntilReady()
 
@@ -514,9 +507,7 @@ var _ = Describe("K8sDatapathConfig", func() {
 			// Sanity check
 			Expect(dstHost.String()).Should(Equal(k8s2IP))
 
-			privateIface, err := kubectl.GetPrivateIface()
-			Expect(err).Should(BeNil(), "Cannot determine private iface")
-			cmd := fmt.Sprintf("tcpdump -i %s --immediate-mode -n 'host %s and host %s' -c 1", privateIface, srcPodIP, dstPodIP)
+			cmd := fmt.Sprintf("tcpdump -i %s --immediate-mode -n 'host %s and host %s' -c 1", interNodeDev, srcPodIP, dstPodIP)
 
 			res1, cancel1, err := kubectl.ExecInHostNetNSInBackground(context.TODO(), k8s1NodeName, cmd)
 			Expect(err).Should(BeNil(), "Cannot exec tcpdump in bg")
@@ -541,6 +532,29 @@ var _ = Describe("K8sDatapathConfig", func() {
 			// Check that the remote host can reach the dst pod
 			kubectl.ExecInHostNetNS(context.TODO(), k8s1NodeName,
 				helpers.CurlFail("http://%s:80/", dstPodIP)).ExpectSuccess("Failed to curl dst pod from k8s1")
+		}
+
+		It("Pod2pod is encrypted in direct-routing mode", func() {
+			deploymentManager.DeployCilium(map[string]string{
+				"tunnel":               "disabled",
+				"autoDirectNodeRoutes": "true",
+				"wireguard.enabled":    "true",
+				"l7Proxy":              "false",
+			}, DeployCiliumOptionsAndDNS)
+
+			privateIface, err := kubectl.GetPrivateIface()
+			Expect(err).Should(BeNil(), "Cannot determine private iface")
+			testWireguard(privateIface)
+		})
+
+		It("Pod2pod is encrypted in tunneling mode", func() {
+			deploymentManager.DeployCilium(map[string]string{
+				"tunnel":            "vxlan",
+				"wireguard.enabled": "true",
+				"l7Proxy":           "false",
+			}, DeployCiliumOptionsAndDNS)
+
+			testWireguard("cilium_vxlan")
 		})
 	})
 
