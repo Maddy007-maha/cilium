@@ -810,6 +810,12 @@ skip_egress_gateway:
 #endif
 
 #ifdef ENCAP_IFINDEX
+#ifdef ENABLE_WIREGUARD
+	/* Don't send pod2pod over tunnel which would bypass Wireguard
+	 * encryption
+	 */
+	if (!dst_remote_ep)
+#endif
 	{
 		struct endpoint_key key = {};
 
@@ -831,7 +837,7 @@ skip_egress_gateway:
 		else
 			return ret;
 	}
-#endif
+#endif /* ENCAP_IFINDEX */
 	if (is_defined(ENABLE_REDIRECT_FAST))
 		return redirect_direct_v4(ctx, l3_off, ip4);
 
@@ -862,20 +868,22 @@ pass_to_stack:
 	if (unlikely(ret != CTX_ACT_OK))
 		return ret;
 #endif
-#ifndef ENCAP_IFINDEX
-#ifdef ENABLE_IPSEC
-	if (encrypt_key && tunnel_endpoint) {
-		set_encrypt_key_mark(ctx, encrypt_key);
-#ifdef IP_POOLS
-		set_encrypt_dip(ctx, tunnel_endpoint);
-#endif
-	} else
-#elif defined(ENABLE_WIREGUARD)
+
+#ifdef ENABLE_WIREGUARD
 	if (dst_remote_ep)
 		set_encrypt_mark(ctx);
 	else /* Wireguard and identity mark are mutually exclusive */
-#endif /* ENABLE_IPSEC */
-#endif /* ENCAP_IFINDEX */
+#elif !defined(ENCAP_IFINDEX)
+# ifdef ENABLE_IPSEC
+	if (encrypt_key && tunnel_endpoint) {
+		set_encrypt_key_mark(ctx, encrypt_key);
+#  ifdef IP_POOLS
+		set_encrypt_dip(ctx, tunnel_endpoint);
+#  endif /* IP_POOLS */
+	} else
+# elif defined(ENABLE_WIREGUARD)
+# endif /* ENABLE_IPSEC */
+#endif /* ENABLE_WIREGUARD */
 	{
 #ifdef ENABLE_IDENTITY_MARK
 		/* Always encode the source identity when passing to the stack.
